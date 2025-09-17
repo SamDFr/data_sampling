@@ -1,6 +1,9 @@
 # dim_red_utils.py
 import numpy as np
 import pandas as pd
+import json
+import numpy as np
+from sklearn.decomposition import PCA
 
 def select_by_pca_box(embedding, ranges):
     """
@@ -61,8 +64,8 @@ def group_summary(df):
     Returns
     -------
     (grp, tot)
-    grp : DataFrame, counts per (file_path, struct_id, symbol, is_fixed).
-    tot : DataFrame, total counts per (file_path, struct_id).
+    grp : DataFrame, counts per (file_path, struct_id,symbol, is_fixed).
+    tot : DataFrame, total counts per (file_path, struct_id, ).
     """
     grp = (df
            .groupby(["file_path","struct_id","symbol","is_fixed"], as_index=False)
@@ -72,3 +75,23 @@ def group_summary(df):
              .size()
              .rename(columns={"size":"n_atoms_total"}))
     return grp, tot
+
+
+
+def load_pca_model(json_file: str) -> PCA:
+    """
+    Reconstruct a PCA model from a JSON file created in your saving step.
+    """
+    with open(json_file, "r") as f:
+        params = json.load(f)
+
+    # Rebuild PCA object
+    model = PCA(n_components=params["n_components"])
+    model.components_ = np.array(params["components"])
+    model.explained_variance_ = np.array(params["explained_variance"])
+    model.explained_variance_ratio_ = np.array(params["explained_variance_ratio"])
+    model.mean_ = np.array(params["mean"])
+    model.n_components_ = params["n_components"]
+    model.n_features_in_ = params["n_features"]
+
+    return model
