@@ -15,6 +15,7 @@ build/
 env/
 venv/
 
+
 # Jupyter
 .ipynb_checkpoints/
 
@@ -30,6 +31,10 @@ venv/
 *.npy
 *.npz
 *.h5
+desc/
+tests/
+selected/
+embedding/
 
 # VASP files
 vasprun.xml
@@ -76,3 +81,4 @@ Thumbs.db
 # ------------------------
 # Keep param logs but ignore raw descriptors
 !*.txt
+*.csv

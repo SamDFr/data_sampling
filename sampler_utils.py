@@ -14,12 +14,13 @@ from __future__ import annotations
 import numpy as np
 from typing import Dict, Iterable, Tuple, List, Optional
 from tqdm import tqdm
-
 from sklearn.cluster import KMeans
+from sklearn.cluster import Birch
 from sklearn.neighbors import NearestNeighbors
 
-import warnings
 
+
+import warnings
 
 
 def _pbar(iterable, total=None, desc=None, progress=True):
@@ -350,6 +351,84 @@ def hdbscan_medoids(
         idx_out.extend(rng.choice(noise, size=take, replace=False))
     return np.sort(np.array(idx_out, dtype=int))
 
+#### --------- adaptive k selection ----------
+
+def _sanitize_X(X, clip=None):
+    X = np.asarray(X, dtype=np.float32, order="C")
+    ok = np.isfinite(X).all(axis=1)
+    X = X[ok]
+    if clip is not None:
+        np.clip(X, -clip, clip, out=X)
+    return X
+
+def _take_subset(X, n, seed):
+    rng = np.random.default_rng(seed)
+    if X.shape[0] > n:
+        idx = rng.choice(X.shape[0], size=n, replace=False)
+        return X[idx]
+    return X
+
+def _tss_on(Xs):
+    mu = Xs.mean(axis=0, dtype=np.float64)
+    return float(((Xs - mu) ** 2).sum())
+
+def _kmeans_inertia_centers(Xs, k, seed):
+    import warnings
+    Xs64 = np.asarray(Xs, dtype=np.float64, order="C")
+    with np.errstate(all="ignore"), warnings.catch_warnings():
+        warnings.filterwarnings("ignore", message=".*matmul.*")
+        km = KMeans(n_clusters=min(k, Xs64.shape[0]),
+                    n_init=10, random_state=seed, algorithm="elkan").fit(Xs64)
+    return float(km.inertia_), km.cluster_centers_.astype(np.float32, copy=False)
+
+def _nearest_medoids_full(X, centers):
+    nn = NearestNeighbors(n_neighbors=1).fit(X)
+    _, idx = nn.kneighbors(centers)
+    return idx.ravel()
+
+def adaptive_kmeans_medoids(
+    X, target_explained=0.95, k_start=16, k_max=100_000,
+    growth=1.5, seed=0, subsample=200_000, progress=True, standardize=True
+):
+    """
+    Auto-select k: increase k until 1 - inertia/TSS >= target_explained.
+    Returns medoid indices in X and diagnostics in info.
+    """
+    X = _sanitize_X(X, clip=1e6)
+    if standardize:
+        mu = X.mean(0, keepdims=True)
+        std = X.std(0, keepdims=True) + 1e-12
+        X = (X - mu) / std
+
+    Xs = _take_subset(X, subsample, seed)
+    if Xs.shape[0] < 2:
+        raise ValueError("Not enough valid rows for clustering.")
+    tss = _tss_on(Xs)
+
+    k = max(2, int(k_start))
+    history = []
+    bar = tqdm(total=None, desc="Adaptive k-means", disable=not progress)
+
+    while True:
+        inertia, centers = _kmeans_inertia_centers(Xs, k, seed)
+        explained = float(np.clip(1.0 - inertia / tss, 0.0, 1.0))
+        history.append((k, explained))
+        bar.set_postfix({"k": k, "expl": f"{explained:.3f}"})
+
+        if explained >= target_explained or k >= k_max:
+            bar.close()
+            medoid_idx = np.sort(_nearest_medoids_full(X, centers))
+            info = {
+                "k": int(k),
+                "explained": explained,
+                "inertia_subset": float(inertia),
+                "tss_subset": float(tss),
+                "subset_size": int(Xs.shape[0]),
+                "history": history,
+            }
+            return medoid_idx, info
+
+        k = int(min(k_max, max(k + 1, np.ceil(k * growth))))
 
 # ---------- dispatcher ----------
 
@@ -409,6 +488,22 @@ def sample(X: np.ndarray, method: str, k: int, **kwargs) -> np.ndarray:
                                per_cluster=kwargs.get("per_cluster", 1),
                                seed=kwargs.get("seed", 0),
                                progress=progress)
+    
+    if m == "adaptive_kmedoids":
+        idx, info = adaptive_kmeans_medoids(
+            X,
+            target_explained=kwargs.get("target_explained", 0.95),
+            k_start=kwargs.get("k_start", 16),
+            k_max=kwargs.get("k_max", 100000),
+            growth=kwargs.get("growth", 1.5),
+            seed=kwargs.get("seed", 0),
+            subsample=kwargs.get("subsample", 200000),
+            progress=progress,
+            standardize=kwargs.get("standardize", True),
+        )
+        # you can return idx only, or (idx, info); keeping idx for API consistency
+        return idx
+    
     raise ValueError(f"Unknown method: {method}")
 
 
@@ -470,6 +565,9 @@ def atoms_to_structures(
     # normalize file_id keys
     fmap = {int(k): v for k, v in (filemap.items())}
     chosen["file_path"] = chosen["file_id"].map(fmap)
+    
+    n_structs = len(chosen)
+    print(f"Selected {n_structs} unique structures.")
     return chosen.sort_values(["file_path", "struct_id"]).reset_index(drop=True)
 
 
@@ -548,11 +646,9 @@ def pc_coverage_bins(Z_all: np.ndarray, idx: np.ndarray, nbins: int = 50000):
 
 ######## BIRCHHH ########
 
+
 # direct_birch.py
-import numpy as np
-from sklearn.cluster import Birch
-from sklearn.neighbors import NearestNeighbors
-from tqdm import tqdm
+
 
 def weight_pca_by_ev(Z: np.ndarray, ev: np.ndarray) -> np.ndarray:
     """
