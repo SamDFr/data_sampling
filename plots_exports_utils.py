@@ -67,7 +67,7 @@ def plot_sampling_pca(X, idx_atoms, method, per_pc=None, npy_file=None, max_bar=
 
     ax.scatter(
         X[idx_atoms, 0], X[idx_atoms, 1],
-        s=5, alpha=0.9, c="r", marker="o", label=f"sample ({len(idx_atoms)})"
+        s=2, alpha=0.9, c="r", marker="o", label=f"sample ({len(idx_atoms)})"
     )
 
     ax.set_xlabel("PC1")

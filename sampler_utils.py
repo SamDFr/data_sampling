@@ -740,6 +740,9 @@ def direct_birch_sample(
       3) stratified sampling per cluster
     Returns (indices_in_Z, info).
     """
+    print("Using DIRECT-style BIRCH sampling ...")
+    print("from reference: https://doi.org/10.1038/s41524-024-01227-4")
+
     Zw = weight_pca_by_ev(Z_pca, ev)
     labels, centers = birch_fit(Zw, n_clusters=n_clusters,
                                 threshold=threshold,
@@ -755,6 +758,8 @@ def direct_birch_sample(
     return idx, info
 
 def pc_bin_coverage(Z_all: np.ndarray, idx: np.ndarray, nbins: int = 50000) -> tuple[list[float], float]:
+
+
     """
     Fig.2-style 1D bin coverage per PC: fraction of bins hit by sample.
     """
@@ -771,3 +776,87 @@ def pc_bin_coverage(Z_all: np.ndarray, idx: np.ndarray, nbins: int = 50000) -> t
         m = (b >= 0) & (b < nbins)
         cov.append(np.unique(b[m]).size / nbins)
     return cov, float(np.mean(cov))
+
+def pc_coverage_bins_auto(
+    Z_all: np.ndarray,
+    idx: np.ndarray,
+    mode: str = "width",
+    target_width: float = 1.0,
+    min_bins: int = 10,
+    max_bins: int = 200,
+    eps: float = 1e-12,
+):
+    """
+    Compute per-PC bin coverage of a sampled subset with automatic bin selection.
+
+    Parameters
+    ----------
+    Z_all : ndarray, shape (N, d)
+        PCA scores of all points.
+    idx : ndarray, shape (k,)
+        Indices of sampled points in Z_all.
+    mode : {"width", "fd", "scott"}, default="width"
+        Strategy to choose bin width:
+        - "width": use fixed target width.
+        - "fd": Freedman–Diaconis rule (robust to outliers).
+        - "scott": Scott’s rule (assumes Gaussian).
+    target_width : float
+        Bin width when mode="width".
+    min_bins : int
+        Minimum number of bins.
+    max_bins : int
+        Maximum number of bins.
+    eps : float
+        Numerical safeguard for zero ranges.
+
+    Returns
+    -------
+    per_pc : list of float
+        Coverage fraction [0,1] per principal component.
+    mean_cov : float
+        Mean coverage across PCs.
+    bins_used : list of int
+        Number of bins used per PC.
+    """
+    Z_all = np.asarray(Z_all)
+    Zs = Z_all[idx]
+    N, d = Z_all.shape
+
+    per_pc, bins_used = [], []
+
+    for j in range(d):
+        x = Z_all[:, j]
+        s = Zs[:, j]
+        xmin, xmax = np.min(x), np.max(x)
+        span = max(xmax - xmin, eps)
+
+        # --- choose bin width
+        if mode == "fd":
+            iqr = np.subtract(*np.percentile(x, [75, 25]))
+            width = max(2.0 * max(iqr, eps) * (N ** (-1.0 / 3.0)), eps)
+        elif mode == "scott":
+            std = max(np.std(x), eps)
+            width = max(3.5 * std * (N ** (-1.0 / 3.0)), eps)
+        else:  # "width"
+            width = max(target_width, eps)
+
+        nb = int(np.clip(np.ceil(span / width), min_bins, max_bins))
+        bins_used.append(nb)
+
+        edges = np.linspace(xmin, xmax, nb + 1)
+
+        # bins occupied by full dataset
+        b_all = np.digitize(x, edges) - 1
+        m_all = (b_all >= 0) & (b_all < nb)
+        support = np.unique(b_all[m_all])
+        denom = max(len(support), 1)
+
+        # bins covered by subset
+        b_s = np.digitize(s, edges) - 1
+        m_s = (b_s >= 0) & (b_s < nb)
+        covered = np.intersect1d(np.unique(b_s[m_s]), support).size
+
+        per_pc.append(covered / denom)
+
+    mean_cov = float(np.mean(per_pc)) if d else 0.0
+    return per_pc, mean_cov, bins_used
