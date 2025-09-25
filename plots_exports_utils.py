@@ -87,20 +87,54 @@ def _load_struct(path: str, frame_idx: int) -> Atoms:
     """Read a single structure index from a vasprun.xml-like file."""
     return read(path, index=int(frame_idx))
 
+#def _collect_images(chosen_structs: pd.DataFrame) -> List[Atoms]:
+#    """
+#    chosen_structs must have columns: ['file_path','struct_id'].
+#    Returns list of Atoms in row order.
+#   """
+#    req_cols = {"file_path", "struct_id"}
+#    missing = req_cols - set(chosen_structs.columns)
+#   if missing:
+#        raise KeyError(f"chosen_structs missing columns: {missing}")
+#
+#    imgs: List[Atoms] = []
+#    for _, row in tqdm(chosen_structs.iterrows(), total=len(chosen_structs), desc="Loading structures"):
+#        imgs.append(_load_struct(row["file_path"], int(row["struct_id"])))
+#    return imgs
+
 def _collect_images(chosen_structs: pd.DataFrame) -> List[Atoms]:
     """
-    chosen_structs must have columns: ['file_path','struct_id'].
-    Returns list of Atoms in row order.
+    Efficient: open each file once, read all requested frames in one call,
+    then reorder to match the input rows.
+    Requires columns: ['file_path','struct_id'].
     """
-    req_cols = {"file_path", "struct_id"}
-    missing = req_cols - set(chosen_structs.columns)
+    req = {"file_path", "struct_id"}
+    missing = req - set(chosen_structs.columns)
     if missing:
         raise KeyError(f"chosen_structs missing columns: {missing}")
 
-    imgs: List[Atoms] = []
-    for _, row in tqdm(chosen_structs.iterrows(), total=len(chosen_structs), desc="Loading structures"):
-        imgs.append(_load_struct(row["file_path"], int(row["struct_id"])))
-    return imgs
+    images: List[Atoms] = []
+
+    # group by file to avoid repeated open/parse
+    for fpath, grp in tqdm(chosen_structs.groupby("file_path", sort=False),
+                           total=chosen_structs["file_path"].nunique(),
+                           desc="Loading structures (grouped)"):
+        ids = grp["struct_id"].astype(int).tolist()
+        uniq_sorted = sorted(set(ids))
+
+        # read all needed frames from this file in one shot
+        block = read(fpath, index=uniq_sorted)  # returns Atoms or list[Atoms]
+        if isinstance(block, Atoms):
+            block = [block]
+
+        # map struct_id -> Atoms (positions in 'block' follow uniq_sorted)
+        id_to_atoms = {sid: block[i] for i, sid in enumerate(uniq_sorted)}
+
+        # append in the original order given by 'grp'
+        for sid in ids:
+            images.append(id_to_atoms[int(sid)])
+
+    return images
 
 def _can_write_single_xdatcar(images: List[Atoms]) -> bool:
     """XDATCAR needs constant atom count and species order across frames."""
