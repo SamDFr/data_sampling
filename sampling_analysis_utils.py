@@ -91,36 +91,96 @@ def frame_rms_force(images: List[Atoms], species_filter: Optional[Iterable[str]]
 
 # ---------- NO GEOMETRY ON GRAPHITE ----------
 
+
 def _fit_plane(points: np.ndarray) -> Tuple[np.ndarray, float]:
     """
-    Least-squares plane fit n⋅x + c = 0.
-    Returns (unit normal n, c).
+    Least-squares plane fit n·x + c = 0 on PBC-consistent points.
+    Returns (unit normal n, offset c).
     """
     X = np.asarray(points, float)
     ctr = X.mean(0)
-    U, S, Vt = np.linalg.svd(X - ctr, full_matrices=False)
+    _, _, Vt = np.linalg.svd(X - ctr, full_matrices=False)
     n = Vt[-1]
-    n = n / (np.linalg.norm(n) + 1e-15)
+    n /= (np.linalg.norm(n) + 1e-15)
     c = -np.dot(n, ctr)
+    return n, c
+
+def _carbon_positions(atoms: Atoms) -> np.ndarray:
+    pos = atoms.get_positions(wrap=True)
+    sym = np.array(atoms.get_chemical_symbols(), dtype=object)
+    Cpos = pos[sym == "C"]
+    if Cpos.size == 0:
+        raise ValueError("No carbon atoms found.")
+    return Cpos
+
+def _plane_from_carbons(
+    atoms: Atoms,
+    mode: str = "mid",
+    use_bottom_fraction: float = 0.5,
+    cutoff: float = 1.8
+) -> Tuple[np.ndarray, float]:
+    """
+    Build plane from carbons.
+      mode='mid'    : fit to central fraction along z (robust mid-slab plane)
+      mode='top'    : fit to carbons within 'cutoff' Å of z_max (top layer)
+      mode='bottom' : fit to carbons within 'cutoff' Å of z_min (bottom layer)
+    """
+    Cpos = _carbon_positions(atoms)
+    z = Cpos[:, 2]
+    if mode == "mid":
+        zmin, zmax = np.min(z), np.max(z)
+        z0 = zmin + (1 - use_bottom_fraction) * (zmax - zmin) / 2
+        z1 = zmax - (1 - use_bottom_fraction) * (zmax - zmin) / 2
+        slab = Cpos[(z >= z0) & (z <= z1)]
+        if slab.shape[0] < 3:
+            slab = Cpos
+        n, c = _fit_plane(slab)
+    elif mode == "top":
+        zmax = np.max(z)
+        top = Cpos[z >= zmax - cutoff]
+        if top.shape[0] < 3:
+            raise ValueError("Not enough carbons to fit top-layer plane.")
+        n, c = _fit_plane(top)
+    elif mode == "bottom":
+        zmin = np.min(z)
+        bot = Cpos[z <= zmin + cutoff]
+        if bot.shape[0] < 3:
+            raise ValueError("Not enough carbons to fit bottom-layer plane.")
+        n, c = _fit_plane(bot)
+    else:
+        raise ValueError("mode must be 'mid', 'top', or 'bottom'.")
+
+    if n[2] < 0:  # keep upward orientation
+        n = -n
     return n, c
 
 def graphite_normal(atoms: Atoms, use_bottom_fraction: float = 0.5) -> np.ndarray:
     """
-    Estimate surface normal from carbons by plane fit.
-    Uses the denser slab region: take carbons within the central fraction of z-range.
-    Returns unit normal pointing roughly +z (flip for consistency).
+    Mid-slab normal for backward compatibility.
     """
-    pos = atoms.get_positions()
+    n, _ = _plane_from_carbons(atoms, mode="mid", use_bottom_fraction=use_bottom_fraction)
+    return n
+    """
+    Estimate graphite surface normal under PBC.
+    - Wrap positions to one image.
+    - Select central fraction along z.
+    - Fit plane to carbons, return unit normal pointing to +z.
+    """
+    pos = atoms.get_positions(wrap=True)
     sym = np.array(atoms.get_chemical_symbols(), dtype=object)
     Cpos = pos[sym == "C"]
+    if Cpos.size == 0:
+        raise ValueError("No carbon atoms found.")
+
     z = Cpos[:, 2]
     zmin, zmax = np.min(z), np.max(z)
-    z0, z1 = zmin + (1 - use_bottom_fraction) * (zmax - zmin) / 2, zmax - (1 - use_bottom_fraction) * (zmax - zmin) / 2
+    z0 = zmin + (1 - use_bottom_fraction) * (zmax - zmin) / 2
+    z1 = zmax - (1 - use_bottom_fraction) * (zmax - zmin) / 2
     slab = Cpos[(z >= z0) & (z <= z1)]
     if slab.shape[0] < 3:
         slab = Cpos
+
     n, _ = _fit_plane(slab)
-    # make normal point to +z for consistency
     if n[2] < 0:
         n = -n
     return n
@@ -131,73 +191,101 @@ def _atom_indices(atoms: Atoms, symbol: str) -> np.ndarray:
 
 def no_bond_length(atoms: Atoms) -> Optional[float]:
     """
-    Return N–O distance (assumes a single NO molecule present).
-    If multiple N/O, returns the shortest N–O distance.
+    Shortest N–O distance (Å) with minimum-image convention.
     """
     N = _atom_indices(atoms, "N"); O = _atom_indices(atoms, "O")
     if len(N) == 0 or len(O) == 0:
         return None
-    r = atoms.get_positions()
     dmin = None
     for i in N:
         for j in O:
-            d = np.linalg.norm(r[j] - r[i])
+            d = atoms.get_distance(i, j, mic=True)
             dmin = d if dmin is None or d < dmin else dmin
-    return dmin
+    return float(dmin)
 
 def no_axis(atoms: Atoms) -> Optional[np.ndarray]:
     """
-    Unit vector along N→O for the closest N–O pair (see no_bond_length).
+    Unit vector along closest N→O under PBC.
     """
     N = _atom_indices(atoms, "N"); O = _atom_indices(atoms, "O")
     if len(N) == 0 or len(O) == 0:
         return None
-    r = atoms.get_positions()
     best = None; vbest = None
     for i in N:
         for j in O:
-            v = r[j] - r[i]
+            v = atoms.get_distance(i, j, vector=True, mic=True)
             d = np.linalg.norm(v)
-            if d == 0: 
+            if d == 0:
                 continue
             if best is None or d < best:
                 best, vbest = d, v / d
     return vbest
 
-def adsorption_heights(atoms: Atoms) -> Dict[str, float]:
+def adsorption_heights(
+    atoms: Atoms,
+    plane: str = "mid",
+    use_bottom_fraction: float = 0.5,
+    cutoff: float = 1.8
+) -> Dict[str, float]:
     """
-    Height of N, O, and NO center-of-mass above graphite plane.
-    Returns {'h_N','h_O','h_COM'} in Å.
+    Heights of N, O, and NO COM above a chosen graphite reference plane (Å), PBC-aware.
+      plane: 'mid' | 'top' | 'bottom'
+      use_bottom_fraction: central fraction for 'mid' plane
+      cutoff: Å window to define top/bottom layer
+    Returns {'h_N','h_O','h_COM'} with NaN if atom missing.
     """
-    n = graphite_normal(atoms)  # unit
-    pos = atoms.get_positions()
-    sym = np.array(atoms.get_chemical_symbols(), dtype=object)
-    # plane constant using carbon plane
-    Cpos = pos[sym == "C"]
-    _, c = _fit_plane(Cpos)
-    def height(p):  # signed distance
-        return (np.dot(n, p) + c)
+    pos = atoms.get_positions(wrap=True)
+    n, c = _plane_from_carbons(atoms, mode=plane, use_bottom_fraction=use_bottom_fraction, cutoff=cutoff)
+
+    def height(p):  # signed distance to plane
+        return float(np.dot(n, p) + c)
+
     out = {}
     Ni = _atom_indices(atoms, "N"); Oi = _atom_indices(atoms, "O")
-    out["h_N"] = float(height(pos[Ni[0]])) if len(Ni) else np.nan
-    out["h_O"] = float(height(pos[Oi[0]])) if len(Oi) else np.nan
+    out["h_N"] = height(pos[Ni[0]]) if len(Ni) else np.nan
+    out["h_O"] = height(pos[Oi[0]]) if len(Oi) else np.nan
     if len(Ni) and len(Oi):
         com = 0.5 * (pos[Ni[0]] + pos[Oi[0]])
-        out["h_COM"] = float(height(com))
+        out["h_COM"] = height(com)
     else:
         out["h_COM"] = np.nan
     return out
 
-def tilt_angle_deg(atoms: Atoms) -> Optional[float]:
+def tilt_angle_deg(
+    atoms: Atoms,
+    plane: str = "mid",
+    use_bottom_fraction: float = 0.5,
+    cutoff: float = 1.8
+) -> Optional[float]:
     """
-    Angle (degrees) between NO axis and surface normal (0° = upright).
+    Angle between NO axis and chosen graphite plane normal (deg), PBC-aware.
+      plane: 'mid' | 'top' | 'bottom'
+    0° upright, 90° parallel. None if NO missing.
     """
     v = no_axis(atoms)
     if v is None:
         return None
-    n = graphite_normal(atoms)
+    n, _ = _plane_from_carbons(atoms, mode=plane, use_bottom_fraction=use_bottom_fraction, cutoff=cutoff)
     c = np.clip(np.dot(v, n), -1.0, 1.0)
-    return float(np.degrees(acos(c)))
+    return float(np.degrees(np.arccos(c)))
+
+def top_layer_plane(atoms, cutoff=1.5):
+    """
+    Fit a plane only to the top graphene layer.
+    cutoff: Å above z_max to include carbons.
+    """
+    pos = atoms.get_positions(wrap=True)
+    sym = np.array(atoms.get_chemical_symbols(), dtype=object)
+    Cpos = pos[sym == "C"]
+
+    zmax = np.max(Cpos[:, 2])
+    top = Cpos[Cpos[:, 2] > zmax - cutoff]  # only atoms within cutoff of zmax
+    if len(top) < 3:
+        raise ValueError("Not enough carbons for top layer plane.")
+    n, c = _fit_plane(top)
+    if n[2] < 0:
+        n = -n
+    return n, c
 
 # ---------- RDF / COORDINATION ----------
 
