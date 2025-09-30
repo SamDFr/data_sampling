@@ -108,7 +108,6 @@ def _fit_plane(points: np.ndarray) -> Tuple[np.ndarray, float]:
     n = Vt[-1]
     n /= (np.linalg.norm(n) + 1e-15)
     c = -np.dot(n, ctr)
-    print("Plane fit: n =", n, ", c =", c)
     return n, c
 
 def _carbon_positions(atoms: Atoms) -> np.ndarray:
@@ -142,18 +141,21 @@ def _plane_from_carbons(
         if slab.shape[0] < 3:
             slab = Cpos
         n, c = _fit_plane(slab)
+        #print(f"Fitted mid-plane to {slab.shape[0]} carbons (z in [{z0:.2f}, {z1:.2f}])")
     elif mode == "top":
         zmax = np.max(z)
         top = Cpos[z >= zmax - cutoff]
         if top.shape[0] < 3:
             raise ValueError("Not enough carbons to fit top-layer plane.")
         n, c = _fit_plane(top)
+        #print(f"Fitted top-plane to {top.shape[0]} carbons (z >= {zmax - cutoff:.2f})")
     elif mode == "bottom":
         zmin = np.min(z)
         bot = Cpos[z <= zmin + cutoff]
         if bot.shape[0] < 3:
             raise ValueError("Not enough carbons to fit bottom-layer plane.")
         n, c = _fit_plane(bot)
+        #print(f"Fitted bottom-plane to {bot.shape[0]} carbons (z <= {zmin + cutoff:.2f})")
     else:
         raise ValueError("mode must be 'mid', 'top', or 'bottom'.")
 
@@ -232,26 +234,57 @@ def no_axis(atoms: Atoms) -> Optional[np.ndarray]:
 
 def adsorption_heights(
     atoms: Atoms,
-    plane: str = "mid",
-    use_bottom_fraction: float = 0.5,
-    cutoff: float = 1.8
+    plane: str = "mid",                 # 'mid' | 'top' | 'bottom'
+    use_bottom_fraction: float = 0.5,   # for plane='mid'
+    cutoff: float = 1.8,                # Å window for top/bottom layer selection
+    ref: str = "plane"                  # 'plane' -> fit plane, 'zcap' -> use z max/min of layer
 ) -> Dict[str, float]:
     """
-    Heights of N, O, and NO COM above a chosen graphite reference plane (Å), PBC-aware.
-      plane: 'mid' | 'top' | 'bottom'
-      use_bottom_fraction: central fraction for 'mid' plane
-      cutoff: Å window to define top/bottom layer
-    Returns {'h_N','h_O','h_COM'} with NaN if atom missing.
+    Heights of N, O, and NO COM relative to a graphite reference (Å), PBC-aware in x,y only.
+      ref='plane' : fit plane from carbons (mid/top/bottom) and project distances along its normal
+      ref='zcap'  : use scalar z reference from the selected layer
+                    - top: z_ref = max z of carbon atoms within (z_max - cutoff, z_max]
+                    - bottom: z_ref = min z of carbon atoms within [z_min, z_min + cutoff)
+      plane: which layer defines the reference ('mid' only valid with ref='plane')
+    Returns dict with keys 'h_N','h_O','h_COM' (NaN if missing atom).
     """
-    a = _npz(atoms)
-    pos = a.get_positions(wrap=True)
-    n, c = _plane_from_carbons(a, mode=plane, use_bottom_fraction=use_bottom_fraction, cutoff=cutoff)
+    a = _npz(atoms)                        # ensure z non-periodic
+    pos = a.get_positions(wrap=True)       # wrap x,y only
+    sym = np.array(a.get_chemical_symbols(), dtype=object)
+    Cpos = pos[sym == "C"]
+    if Cpos.size == 0:
+        raise ValueError("No carbon atoms found.")
 
-    def height(p):  # signed distance to plane
-        return float(np.dot(n, p) + c)
+    if ref == "plane":
+        n, c = _plane_from_carbons(a, mode=plane, use_bottom_fraction=use_bottom_fraction, cutoff=cutoff)
+        def height(p):
+            return float(np.dot(n, p) + c)
+
+    elif ref == "zcap":
+        z = Cpos[:, 2]
+        if plane == "top":
+            zmax = z.max()
+            layer = z >= (zmax - cutoff)
+            if layer.sum() < 1:
+                raise ValueError("No carbons in top zcap window.")
+            z_ref = z[layer].max()  # cap height at topmost carbons
+            def height(p):
+                return float(p[2] - z_ref)  # positive above top surface
+        elif plane == "bottom":
+            zmin = z.min()
+            layer = z <= (zmin + cutoff)
+            if layer.sum() < 1:
+                raise ValueError("No carbons in bottom zcap window.")
+            z_ref = z[layer].min()
+            def height(p):
+                return float(z_ref - p[2])  # positive above bottom surface
+        else:
+            raise ValueError("For ref='zcap', plane must be 'top' or 'bottom'.")
+    else:
+        raise ValueError("ref must be 'plane' or 'zcap'.")
 
     out = {}
-    Ni = _atom_indices(atoms, "N"); Oi = _atom_indices(atoms, "O")
+    Ni = _atom_indices(a, "N"); Oi = _atom_indices(a, "O")
     out["h_N"] = height(pos[Ni[0]]) if len(Ni) else np.nan
     out["h_O"] = height(pos[Oi[0]]) if len(Oi) else np.nan
     if len(Ni) and len(Oi):

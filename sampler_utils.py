@@ -747,6 +747,8 @@ def direct_birch_sample(
     labels, centers = birch_fit(Zw, n_clusters=n_clusters,
                                 threshold=threshold,
                                 branching_factor=branching_factor)
+    print(f"BIRCH: {int(np.unique(labels).size)} clusters found.")
+    print(f"Sampling {int(k_per_cluster)} per cluster ...")
     idx = stratified_pick(Zw, labels, centers, k_per_cluster=k_per_cluster, progress=progress)
     info = {
         "n_clusters": int(np.unique(labels).size),
