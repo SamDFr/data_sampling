@@ -91,6 +91,11 @@ def frame_rms_force(images: List[Atoms], species_filter: Optional[Iterable[str]]
 
 # ---------- NO GEOMETRY ON GRAPHITE ----------
 
+# Helper to work on a non-periodic-z copy
+def _npz(a):
+    b = a.copy()
+    b.set_pbc((True, True, False))
+    return b
 
 def _fit_plane(points: np.ndarray) -> Tuple[np.ndarray, float]:
     """
@@ -103,10 +108,12 @@ def _fit_plane(points: np.ndarray) -> Tuple[np.ndarray, float]:
     n = Vt[-1]
     n /= (np.linalg.norm(n) + 1e-15)
     c = -np.dot(n, ctr)
+    print("Plane fit: n =", n, ", c =", c)
     return n, c
 
 def _carbon_positions(atoms: Atoms) -> np.ndarray:
-    pos = atoms.get_positions(wrap=True)
+    #pos = atoms.get_positions(wrap=True)
+    pos = _npz(atoms).get_positions(wrap=True)  # wraps only x,y because pbc[2]=False
     sym = np.array(atoms.get_chemical_symbols(), dtype=object)
     Cpos = pos[sym == "C"]
     if Cpos.size == 0:
@@ -193,7 +200,8 @@ def no_bond_length(atoms: Atoms) -> Optional[float]:
     """
     Shortest N–O distance (Å) with minimum-image convention.
     """
-    N = _atom_indices(atoms, "N"); O = _atom_indices(atoms, "O")
+    a = _npz(atoms)
+    N = _atom_indices(a, "N"); O = _atom_indices(a, "O")
     if len(N) == 0 or len(O) == 0:
         return None
     dmin = None
@@ -207,7 +215,8 @@ def no_axis(atoms: Atoms) -> Optional[np.ndarray]:
     """
     Unit vector along closest N→O under PBC.
     """
-    N = _atom_indices(atoms, "N"); O = _atom_indices(atoms, "O")
+    a = _npz(atoms)
+    N = _atom_indices(a, "N"); O = _atom_indices(a, "O")
     if len(N) == 0 or len(O) == 0:
         return None
     best = None; vbest = None
@@ -234,8 +243,9 @@ def adsorption_heights(
       cutoff: Å window to define top/bottom layer
     Returns {'h_N','h_O','h_COM'} with NaN if atom missing.
     """
-    pos = atoms.get_positions(wrap=True)
-    n, c = _plane_from_carbons(atoms, mode=plane, use_bottom_fraction=use_bottom_fraction, cutoff=cutoff)
+    a = _npz(atoms)
+    pos = a.get_positions(wrap=True)
+    n, c = _plane_from_carbons(a, mode=plane, use_bottom_fraction=use_bottom_fraction, cutoff=cutoff)
 
     def height(p):  # signed distance to plane
         return float(np.dot(n, p) + c)
@@ -262,10 +272,11 @@ def tilt_angle_deg(
       plane: 'mid' | 'top' | 'bottom'
     0° upright, 90° parallel. None if NO missing.
     """
-    v = no_axis(atoms)
+    a = _npz(atoms)
+    v = no_axis(a)
     if v is None:
         return None
-    n, _ = _plane_from_carbons(atoms, mode=plane, use_bottom_fraction=use_bottom_fraction, cutoff=cutoff)
+    n, _ = _plane_from_carbons(a, mode=plane, use_bottom_fraction=use_bottom_fraction, cutoff=cutoff)
     c = np.clip(np.dot(v, n), -1.0, 1.0)
     return float(np.degrees(np.arccos(c)))
 
