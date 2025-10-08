@@ -570,6 +570,20 @@ def atoms_to_structures(
     print(f"Selected {n_structs} unique structures.")
     return chosen.sort_values(["file_path", "struct_id"]).reset_index(drop=True)
 
+# --- helper: atoms from selected structures (rows in X/metadata_df)
+def lifted_atom_indices_from_structs(metadata_df, chosen_structs):
+    """
+    Return row indices in metadata_df (and X) for all atoms whose
+    (file_id, struct_id) appear in chosen_structs.
+    Assumes metadata_df rows align 1:1 with X rows.
+    """
+    keep = metadata_df.merge(
+        chosen_structs.loc[:, ["file_id", "struct_id"]].drop_duplicates(),
+        on=["file_id", "struct_id"],
+        how="inner",
+        copy=False,
+    )
+    return keep.index.to_numpy()
 
 # ---------- convenience IO ----------
 
