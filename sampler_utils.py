@@ -57,7 +57,6 @@ def random_sample(X: np.ndarray, k: int, seed: int = 0) -> np.ndarray:
     idx = rng.choice(n, size=k, replace=False)
     return np.sort(idx)
 
-
 def stratified_grid(
     X: np.ndarray,
     k: int,
@@ -506,6 +505,180 @@ def sample(X: np.ndarray, method: str, k: int, **kwargs) -> np.ndarray:
     
     raise ValueError(f"Unknown method: {method}")
 
+def sample_to_coverage(
+    X,
+    method="fps",
+    target_mean_cov=0.90,          # e.g., 90% mean PCA-bin coverage
+    k_start=5_000,
+    k_max=200_000,
+    growth=1.3,                    # multiplicative growth of k each round
+    check_every=None,              # if set (e.g., 5_000), use additive growth instead
+    seed=0,
+    coverage_mode="width",         # passed to pc_coverage_bins_auto
+    target_width=0.10,
+    min_bins=20,
+    max_bins=10_000,
+    progress=True,
+    **kwargs,                      # forwarded to sample()
+):
+    """
+    Iteratively increase k, resample, and stop when mean PCA coverage >= target_mean_cov.
+    Works with any sampling method in `sample(...)`.
+    This function IS NOT INCREMENTAL - each iteration resamples from scratch with larger k.
+    """
+    def coverage(X, idx):
+        per_pc, mean_cov, bins_used = pc_coverage_bins_auto(
+            X, idx, mode=coverage_mode, target_width=target_width,
+            min_bins=min_bins, max_bins=max_bins
+        )
+        return per_pc, mean_cov, bins_used
+
+    k = int(k_start)
+    best = {"k": 0, "idx": None, "per_pc": None, "mean_cov": 0.0, "bins_used": None}
+
+    while k <= k_max:
+        idx = sample(X, method=method, k=k, seed=seed, progress=progress, **kwargs)
+        per_pc, mean_cov, bins_used = coverage(X, idx)
+
+        if progress:
+            print(f"[{method}] k={k:,}  mean_cov={mean_cov:.3f}  bins_used={bins_used[:8]}")
+
+        if mean_cov >= target_mean_cov:
+            return idx, {"k": k, "per_pc": per_pc, "mean_cov": mean_cov, "bins_used": bins_used}
+
+        if mean_cov > best["mean_cov"]:
+            best = {"k": k, "idx": idx, "per_pc": per_pc, "mean_cov": mean_cov, "bins_used": bins_used}
+
+        # grow k
+        if check_every is not None and check_every > 0:
+            k += int(check_every)
+        else:
+            k = int(min(k_max, max(k + 1, round(k * growth))))
+
+    # not reached target; return best so far
+    if progress:
+        print(f"Target not reached. Best mean_cov={best['mean_cov']:.3f} at k={best['k']:,}.")
+    return best["idx"], {"k": best["k"], "per_pc": best["per_pc"], "mean_cov": best["mean_cov"], "bins_used": best["bins_used"]}
+
+def sample_to_coverage_seeded_batches(
+    X,
+    method="fps",
+    target_mean_cov=0.90,
+    k_start=10_000,
+    batch=5_000,
+    k_max=200_000,
+    seed=0,
+    progress=True,
+    coverage_mode="width",
+    target_width=0.10,
+    min_bins=20,
+    max_bins=10_000,
+    **kwargs
+):
+    """
+    Iteratively sample a dataset in batches until a target PCA coverage is reached.
+
+    Each iteration draws new points from the remaining (unsampled) data, 
+    using a different random seed to ensure diversity. The new points are 
+    merged with previously sampled ones, and coverage is recalculated.
+    The process stops when the mean PCA coverage ≥ target_mean_cov or 
+    when the total number of sampled points reaches k_max.
+
+    Parameters
+    ----------
+    X : ndarray of shape (N, d)
+        Input data matrix, typically PCA-reduced descriptors.
+    method : str
+        Sampling strategy passed to `sample(...)` 
+        (e.g., "fps", "kpp", "kmedoids", "density_fps", "hdbscan").
+    target_mean_cov : float, default=0.90
+        Target average PCA-bin coverage to reach before stopping.
+    k_start : int, default=10_000
+        Initial number of points to sample.
+    batch : int, default=5_000
+        Number of new points to add per iteration if coverage is not reached.
+    k_max : int, default=200_000
+        Maximum total number of sampled points (stop condition).
+    seed : int, default=0
+        Base random seed; each batch increments the seed by +1 to ensure diversity.
+    progress : bool, default=True
+        If True, print coverage progress at each iteration.
+    coverage_mode : {"width","bins"}, default="width"
+        Mode passed to `pc_coverage_bins_auto` to define coverage calculation.
+    target_width : float, default=0.10
+        Bin width in PCA units (used if coverage_mode="width").
+    min_bins, max_bins : int, default=(20, 10000)
+        Lower and upper limits on number of bins per PCA component.
+    **kwargs :
+        Extra arguments passed to `sample(...)` (e.g., chunk size, subsample, etc.).
+
+    Returns
+    -------
+    idx : ndarray of shape (k,)
+        Indices of the final sampled points in X.
+    info : dict
+        Dictionary with keys:
+          - "k": total number of sampled points
+          - "mean_cov": final mean PCA coverage
+          - "per_pc": list of per-component coverages
+          - "bins_used": number of bins used per PC
+
+    Notes
+    -----
+    • Each batch samples only from points not already selected.
+    • Each batch uses a new seed (seed + iteration) for diversity.
+    • Sampling method can be FPS, k-means++, k-medoids, etc.
+    • This approach is simpler than a fully incremental FPS: 
+      it avoids recomputing pairwise distances and works generically.
+    """
+
+    def coverage(idx):
+        per_pc, mean_cov, bins_used = pc_coverage_bins_auto(
+            X, idx, mode=coverage_mode, target_width=target_width,
+            min_bins=min_bins, max_bins=max_bins
+        )
+        return per_pc, mean_cov, bins_used
+
+    N = X.shape[0]
+    k0 = min(k_start, k_max, N)
+
+    # initial draw
+    idx = sample(X, method=method, k=k0, seed=seed, progress=progress, **kwargs)
+    sel_mask = np.zeros(N, dtype=bool)
+    sel_mask[idx] = True
+
+    per_pc, mean_cov, bins_used = coverage(idx)
+    if progress:
+        print(f"[{method}-seeded] k={idx.size:,} mean_cov={mean_cov:.3f}")
+
+    # loop: add batches from remaining pool with new seeds
+    round_id = 1
+    while mean_cov < target_mean_cov and idx.size < min(k_max, N):
+        need = min(batch, k_max - idx.size, N - idx.size)
+        if need <= 0:
+            break
+
+        remain = np.where(~sel_mask)[0]
+        if remain.size == 0:
+            break
+
+        # sample only from remaining, then map back
+        k_try = min(need, remain.size)
+        sub = X[remain]
+        cand_sub = sample(sub, method=method, k=k_try,
+                          seed=seed + round_id, progress=progress, **kwargs)
+        cand = remain[cand_sub]
+
+        # add uniques (remain already ensures uniqueness)
+        sel_mask[cand] = True
+        idx = np.where(sel_mask)[0]
+
+        per_pc, mean_cov, bins_used = coverage(idx)
+        if progress:
+            print(f"[{method}-seeded] +{k_try:,} → k={idx.size:,} mean_cov={mean_cov:.3f}")
+        round_id += 1
+
+    return idx, {"k": idx.size, "per_pc": per_pc, "mean_cov": mean_cov, "bins_used": bins_used}
 
 # ---------- lifting to structures ----------
 
