@@ -55,9 +55,9 @@ def plot_sampling_pca(X, idx_atoms, method, per_pc=None, npy_file=None, max_bar=
         m = min(max_bar, len(per_pc), X.shape[1])
         plt.figure(figsize=(7, 3))
         plt.bar(range(1, m + 1), per_pc[:m])
-        plt.xlabel("PC")
-        plt.ylabel("Coverage")
-        plt.title("Bin coverage (Fig.2 metric)")
+        plt.xlabel("PC", fontsize=14)
+        plt.ylabel("Coverage", fontsize=14)
+        plt.title("Bin coverage", fontsize=14)
         plt.tight_layout()
         plt.savefig(f"./selected/{method}_pca_coverage.png", dpi=300)
 
@@ -74,11 +74,11 @@ def plot_sampling_pca(X, idx_atoms, method, per_pc=None, npy_file=None, max_bar=
         s=2, alpha=0.9, c="r", marker="o", label=f"sample ({len(idx_atoms)})"
     )
 
-    ax.set_xlabel("PC1")
-    ax.set_ylabel("PC2")
-    ax.set_title(f"PCA space with {len(idx_atoms)} sampled atoms ({method})")
+    ax.set_xlabel("PC1", fontsize=14)
+    ax.set_ylabel("PC2", fontsize=14)
+    ax.set_title(f"PCA space with {len(idx_atoms)} sampled atoms ({method})", fontsize=14)
     ax.grid(True, linewidth=0.2)
-    ax.legend(frameon=False, loc="best")
+    ax.legend(frameon=False, loc="best", fontsize=12)
     plt.tight_layout()
     plt.savefig(f"./selected/{method}_pca_scatter.png", dpi=300)
 
