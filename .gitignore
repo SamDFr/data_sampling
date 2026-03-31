@@ -82,3 +82,7 @@ Thumbs.db
 # Keep param logs but ignore raw descriptors
 !*.txt
 *.csv
+
+.gitignore
+.WIP/
+.embedding/
