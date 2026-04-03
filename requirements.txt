@@ -7,3 +7,5 @@ tqdm
 ase
 hdbscan
 jupyter
+dscribe
+pyarrow
