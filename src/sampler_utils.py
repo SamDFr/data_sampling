@@ -533,16 +533,24 @@ def sample_to_coverage(
 
     k = int(k_start)
     best = {"k": 0, "idx": None, "per_pc": None, "mean_cov": 0.0, "bins_used": None}
+    history = []
 
     while k <= k_max:
         idx = sample(X, method=method, k=k, seed=seed, progress=progress, **kwargs)
         per_pc, mean_cov, bins_used = coverage(X, idx)
+        history.append({"k": int(k), "mean_cov": float(mean_cov)})
 
         if progress:
             print(f"[{method}] k={k:,}  mean_cov={mean_cov:.3f}  bins_used={bins_used[:8]}")
 
         if mean_cov >= target_mean_cov:
-            return idx, {"k": k, "per_pc": per_pc, "mean_cov": mean_cov, "bins_used": bins_used}
+            return idx, {
+                "k": k,
+                "per_pc": per_pc,
+                "mean_cov": mean_cov,
+                "bins_used": bins_used,
+                "history": history,
+            }
 
         if mean_cov > best["mean_cov"]:
             best = {"k": k, "idx": idx, "per_pc": per_pc, "mean_cov": mean_cov, "bins_used": bins_used}
@@ -556,7 +564,13 @@ def sample_to_coverage(
     # not reached target; return best so far
     if progress:
         print(f"Target not reached. Best mean_cov={best['mean_cov']:.3f} at k={best['k']:,}.")
-    return best["idx"], {"k": best["k"], "per_pc": best["per_pc"], "mean_cov": best["mean_cov"], "bins_used": best["bins_used"]}
+    return best["idx"], {
+        "k": best["k"],
+        "per_pc": best["per_pc"],
+        "mean_cov": best["mean_cov"],
+        "bins_used": best["bins_used"],
+        "history": history,
+    }
 
 def sample_to_coverage_seeded_batches(
     X,
@@ -646,6 +660,7 @@ def sample_to_coverage_seeded_batches(
     sel_mask[idx] = True
 
     per_pc, mean_cov, bins_used = coverage(idx)
+    history = [{"k": int(idx.size), "mean_cov": float(mean_cov)}]
     if progress:
         print(f"[{method}-seeded] k={idx.size:,} mean_cov={mean_cov:.3f}")
 
@@ -672,11 +687,18 @@ def sample_to_coverage_seeded_batches(
         idx = np.where(sel_mask)[0]
 
         per_pc, mean_cov, bins_used = coverage(idx)
+        history.append({"k": int(idx.size), "mean_cov": float(mean_cov)})
         if progress:
             print(f"[{method}-seeded] +{k_try:,} → k={idx.size:,} mean_cov={mean_cov:.3f}")
         round_id += 1
 
-    return idx, {"k": idx.size, "per_pc": per_pc, "mean_cov": mean_cov, "bins_used": bins_used}
+    return idx, {
+        "k": idx.size,
+        "per_pc": per_pc,
+        "mean_cov": mean_cov,
+        "bins_used": bins_used,
+        "history": history,
+    }
 
 # ---------- lifting to structures ----------
 

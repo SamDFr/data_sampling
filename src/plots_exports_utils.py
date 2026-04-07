@@ -131,6 +131,43 @@ def _can_write_single_xdatcar(images: List[Atoms]) -> bool:
             return False
     return True
 
+def _species_sequence(atoms: Atoms) -> Tuple[str, ...]:
+    """Ordered species labels for one structure."""
+    return tuple(atoms.get_chemical_symbols())
+
+def _validate_images_for_export(images: List[Atoms]) -> None:
+    """
+    Basic export-time sanity checks.
+
+    Ensures each loaded structure has a consistent atom count and symbol list.
+    This does not enforce the same composition across frames; it only guarantees
+    that we export the exact structure as loaded, without silent reinterpretation
+    of atom types.
+    """
+    for i, atoms in enumerate(images):
+        symbols = atoms.get_chemical_symbols()
+        if len(symbols) != len(atoms):
+            raise ValueError(
+                f"Loaded structure {i} has inconsistent atom metadata: "
+                f"{len(atoms)} atoms but {len(symbols)} symbols."
+            )
+
+def _build_export_manifest(chosen_structs: pd.DataFrame, images: List[Atoms]) -> pd.DataFrame:
+    """
+    Add structural identity fields to the export manifest so downstream pipelines
+    can verify atom count and ordered species sequence for each exported frame.
+    """
+    if len(chosen_structs) != len(images):
+        raise ValueError(
+            f"Manifest/image length mismatch: {len(chosen_structs)} != {len(images)}"
+        )
+
+    manifest = chosen_structs.copy()
+    manifest["n_atoms"] = [len(a) for a in images]
+    manifest["formula"] = [a.get_chemical_formula() for a in images]
+    manifest["species_sequence"] = [" ".join(_species_sequence(a)) for a in images]
+    return manifest
+
 #for multiple structure loading
 
 def _load_structs(path: str, frame_idx_list: List[int]) -> Dict[int, Atoms]:
@@ -231,6 +268,8 @@ def export_selected_structures(
         _collect_images_grouped(chosen_structs) if mode == "grouped"
         else _collect_images(chosen_structs)
     )
+    _validate_images_for_export(images)
+    manifest_df = _build_export_manifest(chosen_structs, images)
 
     out: Dict[str, str] = {}
 
@@ -240,7 +279,7 @@ def export_selected_structures(
         out["traj"] = traj_path
 
     if manifest:
-        chosen_structs.to_csv(
+        manifest_df.to_csv(
             os.path.join(outdir, f"{method_name}_selected_manifest.csv"), index=False
         )
 

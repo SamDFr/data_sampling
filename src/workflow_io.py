@@ -84,6 +84,31 @@ def serialize_config(config) -> dict:
     raise TypeError(f"Unsupported config type: {type(config)!r}")
 
 
+def clear_directory_outputs(
+    outdir: str | Path,
+    patterns: Sequence[str],
+) -> List[str]:
+    """
+    Remove previously generated files matching the provided glob patterns.
+
+    Returns the list of removed file paths as strings.
+    """
+    outdir = Path(outdir).expanduser().resolve()
+    removed: List[str] = []
+    if not outdir.exists():
+        return removed
+
+    seen: set[Path] = set()
+    for pattern in patterns:
+        for path in outdir.glob(pattern):
+            if path in seen or not path.is_file():
+                continue
+            path.unlink()
+            seen.add(path)
+            removed.append(str(path))
+    return removed
+
+
 def save_descriptor_run(
     outdir: str | Path,
     descriptors: np.ndarray,
@@ -92,12 +117,25 @@ def save_descriptor_run(
     run_config,
     base_name: str,
     timestamp: str | None = None,
+    clear_existing: bool = False,
 ) -> Dict[str, str]:
     """
     Save the descriptor matrix, provenance table, file map, and a config log.
     """
     outdir = Path(outdir).expanduser().resolve()
     outdir.mkdir(parents=True, exist_ok=True)
+    if clear_existing:
+        clear_directory_outputs(
+            outdir,
+            patterns=(
+                "*.npy",
+                "*_provenance.parquet",
+                "*_provenance.csv",
+                "*_filemap.json",
+                "*_params.txt",
+                "*_config.json",
+            ),
+        )
     timestamp = timestamp or datetime.now().strftime("%Y%m%d-%H%M%S")
     prefix = f"{base_name}_{timestamp}"
 

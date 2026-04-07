@@ -60,6 +60,9 @@ X_i = [ SOAP_i , F_i,α , F_i,β ]
 - `*_filemap.json` mapping `file_id -> file_path`.
 - `*_config.json` with `soap_dim`, `force_dim`, `include_forces`.
 
+**Output directory hygiene:**  
+Before saving a new descriptor run, the notebook can clear old descriptor artifacts from `desc/`. This avoids mixing a fresh descriptor matrix with stale provenance/filemap/config files from an older run, which would otherwise create downstream mismatches in notebooks `02` to `06`.
+
 ### 2) `02_descriptors_dim_red.ipynb`
 **Goal:** Standardize and reduce dimensionality of descriptors.
 
@@ -148,6 +151,8 @@ Outputs are written to:
 - `embedding/` (reduced embeddings)
 - `selected/` (sampled structures + manifests)
 
+`01_descriptors_computation.ipynb` now defaults to cleaning old files from `desc/` before saving a new descriptor run. This is intentional: the later notebooks expect one coherent descriptor/provenance/filemap/config set.
+
 ## Optional: Append Forces to SOAP
 
 In `01_descriptors_computation.ipynb`, set:
@@ -180,6 +185,8 @@ If forces are not present in the input files, the pipeline prints a warning and 
    - `*_selected_manifest.csv`
    - `*_selected.traj`, `*_selected.xyz`
    - `valset/`, `trainset/`, `testset/`
+
+The sampled manifest also records structural identity fields used by downstream pipelines, including atom count and ordered species sequence, so exported structures are not silently reinterpreted with the wrong atom types.
 
 ---
 
@@ -223,6 +230,9 @@ You can extend the patterns in `src/workflow_config.py` or directly in the noteb
 
 - **“No provenance table found in desc/”**  
   Run `01_descriptors_computation.ipynb` first.
+
+- **Mismatched files in `desc/` across runs**  
+  Re-run `01_descriptors_computation.ipynb`. The notebook now clears old descriptor artifacts in `desc/` before saving a fresh run so downstream notebooks read a consistent set of files.
 
 - **Parquet read error**  
   Install `pyarrow` (`pip install pyarrow`) or rely on CSV fallback.
