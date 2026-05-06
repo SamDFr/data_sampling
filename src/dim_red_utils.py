@@ -51,7 +51,12 @@ def origins_from_mask(
     -------
     DataFrame with provenance for selected atoms.
     """
-    sub = metadata_df.loc[mask, list(columns)].copy()
+    sub = metadata_df.loc[mask].copy()
+    if "source_struct_id" in sub.columns:
+        # Preserve backward compatibility for downstream code by exposing the
+        # original source-frame index through the standard struct_id column.
+        sub["struct_id"] = sub["source_struct_id"]
+    sub = sub.loc[:, list(columns)].copy()
     fmap = {int(k): v for k, v in filemap.items()}
     sub["file_path"] = sub["file_id"].map(fmap)
     return sub

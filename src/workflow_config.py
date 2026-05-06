@@ -72,6 +72,11 @@ class InputConfig:
     roots: List[str] = field(default_factory=list)
     patterns: List[str] = field(default_factory=lambda: ["vasprun*.xml", "XDATCAR*", "*.xyz", "*.extxyz", "*.traj"])
     recursive: bool = True
+    file_selection_mode: str = "all"
+    random_file_count: int | None = None
+    file_stride: int | None = None
+    selection_seed: int = 0
+    frame_stride: int = 1
 
     def discover(self) -> List[Path]:
         return discover_structure_files(self.roots, patterns=self.patterns, recursive=self.recursive)

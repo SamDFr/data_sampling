@@ -14,17 +14,87 @@ from ase.io import read
 from src.desc_comp_utils import fixed_mask
 
 
-def load_structure_sets(paths: Sequence[str | Path]) -> List[List[Atoms]]:
+def select_structure_files(
+    paths: Sequence[str | Path],
+    mode: str = "all",
+    random_count: int | None = None,
+    file_stride: int | None = None,
+    random_seed: int = 0,
+) -> List[Path]:
+    """
+    Select a subset of structure files from an already-discovered path list.
+
+    Parameters
+    ----------
+    paths
+        Input file paths, typically already sorted by discovery.
+    mode
+        Selection mode: "all", "random", or "stride".
+    random_count
+        Number of files to sample when mode="random".
+    file_stride
+        Keep every Nth file when mode="stride" (indices 0, N, 2N, ...).
+    random_seed
+        Seed used for reproducible random selection.
+    """
+    selected = [Path(path).expanduser().resolve() for path in paths]
+    if mode == "all":
+        return selected
+    if mode == "random":
+        if random_count is None:
+            raise ValueError("random_count must be provided when mode='random'.")
+        if random_count <= 0:
+            raise ValueError("random_count must be >= 1 when mode='random'.")
+        if random_count > len(selected):
+            raise ValueError(
+                f"random_count ({random_count}) cannot exceed the number of files ({len(selected)})."
+            )
+        rng = np.random.default_rng(random_seed)
+        picked = rng.choice(len(selected), size=random_count, replace=False)
+        return [selected[i] for i in sorted(picked.tolist())]
+    if mode == "stride":
+        if file_stride is None:
+            raise ValueError("file_stride must be provided when mode='stride'.")
+        if file_stride <= 0:
+            raise ValueError("file_stride must be >= 1 when mode='stride'.")
+        return selected[::file_stride]
+    raise ValueError(
+        f"Unsupported file selection mode: {mode!r}. "
+        "Expected one of {'all', 'random', 'stride'}."
+    )
+
+
+def load_structure_sets(
+    paths: Sequence[str | Path],
+    frame_stride: int = 1,
+    return_frame_indices: bool = False,
+) -> List[List[Atoms]] | tuple[List[List[Atoms]], List[List[int]]]:
     """
     Load each file in `paths` as a list of ASE Atoms objects.
+
+    Parameters
+    ----------
+    frame_stride
+        Keep every Nth frame from each file (0, N, 2N, ...). Use 1 to keep all.
+    return_frame_indices
+        If True, also return the original frame indices kept from each file.
     """
+    if frame_stride <= 0:
+        raise ValueError("frame_stride must be >= 1.")
+
     out: List[List[Atoms]] = []
+    frame_ids: List[List[int]] = []
     for path in paths:
         frames = read(str(path), index=":")
         if isinstance(frames, Atoms):
-            out.append([frames])
+            full_structures = [frames]
         else:
-            out.append(list(frames))
+            full_structures = list(frames)
+        kept_ids = list(range(0, len(full_structures), frame_stride))
+        out.append([full_structures[i] for i in kept_ids])
+        frame_ids.append(kept_ids)
+    if return_frame_indices:
+        return out, frame_ids
     return out
 
 
@@ -50,29 +120,43 @@ def build_provenance_table(
     structure_sets: Sequence[Sequence[Atoms]],
     paths: Sequence[str | Path],
     fixed_mask_fn: Callable[[Atoms], np.ndarray] = fixed_mask,
+    source_struct_ids: Sequence[Sequence[int]] | None = None,
 ) -> pd.DataFrame:
     if len(structure_sets) != len(paths):
         raise ValueError(
             f"structure_sets and paths must have the same length: "
             f"{len(structure_sets)} != {len(paths)}"
         )
+    if source_struct_ids is not None and len(source_struct_ids) != len(structure_sets):
+        raise ValueError(
+            f"source_struct_ids and structure_sets must have the same length: "
+            f"{len(source_struct_ids)} != {len(structure_sets)}"
+        )
     rows: List[pd.DataFrame] = []
     for file_id, struct_list in enumerate(structure_sets):
+        source_ids = None if source_struct_ids is None else source_struct_ids[file_id]
+        if source_ids is not None and len(source_ids) != len(struct_list):
+            raise ValueError(
+                f"source_struct_ids[{file_id}] and structure_sets[{file_id}] must have the same length: "
+                f"{len(source_ids)} != {len(struct_list)}"
+            )
         for struct_id, atoms in enumerate(struct_list):
             n_atoms = len(atoms)
-            rows.append(
-                pd.DataFrame(
-                    {
-                        "file_id": file_id,
-                        "struct_id": struct_id,
-                        "atom_id": np.arange(n_atoms, dtype=np.int32),
-                        "symbol": atoms.get_chemical_symbols(),
-                        "is_fixed": fixed_mask_fn(atoms),
-                    }
-                )
-            )
+            row = {
+                "file_id": file_id,
+                "struct_id": struct_id,
+                "atom_id": np.arange(n_atoms, dtype=np.int32),
+                "symbol": atoms.get_chemical_symbols(),
+                "is_fixed": fixed_mask_fn(atoms),
+            }
+            if source_ids is not None:
+                row["source_struct_id"] = np.full(n_atoms, source_ids[struct_id], dtype=np.int32)
+            rows.append(pd.DataFrame(row))
     if not rows:
-        return pd.DataFrame(columns=["file_id", "struct_id", "atom_id", "symbol", "is_fixed"])
+        columns = ["file_id", "struct_id", "atom_id", "symbol", "is_fixed"]
+        if source_struct_ids is not None:
+            columns.append("source_struct_id")
+        return pd.DataFrame(columns=columns)
     return pd.concat(rows, ignore_index=True)
 
 

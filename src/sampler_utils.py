@@ -507,6 +507,10 @@ def sample_to_coverage(
     X,
     method="fps",
     target_mean_cov=0.90,          # e.g., 90% mean PCA-bin coverage
+    enable_plateau_stop=False,
+    coverage_threshold_min=None,
+    plateau_window=5,
+    delta_cov=0.002,
     k_start=5_000,
     k_max=200_000,
     growth=1.3,                    # multiplicative growth of k each round
@@ -524,12 +528,32 @@ def sample_to_coverage(
     Works with any sampling method in `sample(...)`.
     This function IS NOT INCREMENTAL - each iteration resamples from scratch with larger k.
     """
+    if enable_plateau_stop:
+        if coverage_threshold_min is None:
+            raise ValueError("coverage_threshold_min must be provided when enable_plateau_stop=True.")
+        if coverage_threshold_min > target_mean_cov:
+            raise ValueError("coverage_threshold_min must be <= target_mean_cov.")
+        if plateau_window < 2:
+            raise ValueError("plateau_window must be >= 2 when enable_plateau_stop=True.")
+        if delta_cov < 0:
+            raise ValueError("delta_cov must be >= 0 when enable_plateau_stop=True.")
+
     def coverage(X, idx):
         per_pc, mean_cov, bins_used = pc_coverage_bins_auto(
             X, idx, mode=coverage_mode, target_width=target_width,
             min_bins=min_bins, max_bins=max_bins
         )
         return per_pc, mean_cov, bins_used
+
+    def plateau_reached(history):
+        if not enable_plateau_stop or len(history) < plateau_window:
+            return False
+        window = history[-plateau_window:]
+        current_cov = window[-1]["mean_cov"]
+        if current_cov < coverage_threshold_min:
+            return False
+        cov_values = [point["mean_cov"] for point in window]
+        return (max(cov_values) - min(cov_values)) <= delta_cov
 
     k = int(k_start)
     best = {"k": 0, "idx": None, "per_pc": None, "mean_cov": 0.0, "bins_used": None}
@@ -550,10 +574,26 @@ def sample_to_coverage(
                 "mean_cov": mean_cov,
                 "bins_used": bins_used,
                 "history": history,
+                "stop_reason": "target_reached",
             }
 
         if mean_cov > best["mean_cov"]:
             best = {"k": k, "idx": idx, "per_pc": per_pc, "mean_cov": mean_cov, "bins_used": bins_used}
+
+        if plateau_reached(history):
+            if progress:
+                print(
+                    f"[{method}] plateau stop at k={k:,}: "
+                    f"mean_cov window span <= {delta_cov:.4f} after reaching {coverage_threshold_min:.3f}"
+                )
+            return best["idx"], {
+                "k": best["k"],
+                "per_pc": best["per_pc"],
+                "mean_cov": best["mean_cov"],
+                "bins_used": best["bins_used"],
+                "history": history,
+                "stop_reason": "plateau",
+            }
 
         # grow k
         if check_every is not None and check_every > 0:
@@ -570,12 +610,17 @@ def sample_to_coverage(
         "mean_cov": best["mean_cov"],
         "bins_used": best["bins_used"],
         "history": history,
+        "stop_reason": "k_max",
     }
 
 def sample_to_coverage_seeded_batches(
     X,
     method="fps",
     target_mean_cov=0.90,
+    enable_plateau_stop=False,
+    coverage_threshold_min=None,
+    plateau_window=5,
+    delta_cov=0.002,
     k_start=10_000,
     batch=5_000,
     k_max=200_000,
@@ -643,6 +688,15 @@ def sample_to_coverage_seeded_batches(
     • This approach is simpler than a fully incremental FPS: 
       it avoids recomputing pairwise distances and works generically.
     """
+    if enable_plateau_stop:
+        if coverage_threshold_min is None:
+            raise ValueError("coverage_threshold_min must be provided when enable_plateau_stop=True.")
+        if coverage_threshold_min > target_mean_cov:
+            raise ValueError("coverage_threshold_min must be <= target_mean_cov.")
+        if plateau_window < 2:
+            raise ValueError("plateau_window must be >= 2 when enable_plateau_stop=True.")
+        if delta_cov < 0:
+            raise ValueError("delta_cov must be >= 0 when enable_plateau_stop=True.")
 
     def coverage(idx):
         per_pc, mean_cov, bins_used = pc_coverage_bins_auto(
@@ -650,6 +704,16 @@ def sample_to_coverage_seeded_batches(
             min_bins=min_bins, max_bins=max_bins
         )
         return per_pc, mean_cov, bins_used
+
+    def plateau_reached(history):
+        if not enable_plateau_stop or len(history) < plateau_window:
+            return False
+        window = history[-plateau_window:]
+        current_cov = window[-1]["mean_cov"]
+        if current_cov < coverage_threshold_min:
+            return False
+        cov_values = [point["mean_cov"] for point in window]
+        return (max(cov_values) - min(cov_values)) <= delta_cov
 
     N = X.shape[0]
     k0 = min(k_start, k_max, N)
@@ -690,6 +754,20 @@ def sample_to_coverage_seeded_batches(
         history.append({"k": int(idx.size), "mean_cov": float(mean_cov)})
         if progress:
             print(f"[{method}-seeded] +{k_try:,} → k={idx.size:,} mean_cov={mean_cov:.3f}")
+        if plateau_reached(history):
+            if progress:
+                print(
+                    f"[{method}-seeded] plateau stop at k={idx.size:,}: "
+                    f"mean_cov window span <= {delta_cov:.4f} after reaching {coverage_threshold_min:.3f}"
+                )
+            return idx, {
+                "k": idx.size,
+                "per_pc": per_pc,
+                "mean_cov": mean_cov,
+                "bins_used": bins_used,
+                "history": history,
+                "stop_reason": "plateau",
+            }
         round_id += 1
 
     return idx, {
@@ -698,6 +776,7 @@ def sample_to_coverage_seeded_batches(
         "mean_cov": mean_cov,
         "bins_used": bins_used,
         "history": history,
+        "stop_reason": "target_reached" if mean_cov >= target_mean_cov else "k_max",
     }
 
 # ---------- lifting to structures ----------
@@ -721,6 +800,8 @@ def atoms_to_structures(
         Row indices into X (and into metadata_df) for selected atoms.
     metadata_df : pandas.DataFrame
         Provenance table with columns at least ["file_id","struct_id"].
+        If "source_struct_id" is present, it is used as the canonical frame
+        index for structure-level aggregation.
     filemap : dict
         Maps file_id (int or str) -> absolute file path.
     choose : {"all","top","threshold"}
@@ -742,12 +823,19 @@ def atoms_to_structures(
     Use this to move from atom-level sampling to a list of whole structures
     to extract and build an initial training set.
     """
+    effective_struct_id_col = (
+        "source_struct_id"
+        if struct_id_col == "struct_id" and "source_struct_id" in metadata_df.columns
+        else struct_id_col
+    )
     hit = (
         metadata_df.iloc[sel_idx]
-        .groupby([file_id_col, struct_id_col], as_index=False)
+        .groupby([file_id_col, effective_struct_id_col], as_index=False)
         .size()
         .rename(columns={"size": "n_atoms_hit"})
     )
+    if effective_struct_id_col != struct_id_col:
+        hit = hit.rename(columns={effective_struct_id_col: struct_id_col})
     if choose == "all":
         chosen = hit
     elif choose == "threshold":
@@ -772,9 +860,15 @@ def lifted_atom_indices_from_structs(metadata_df, chosen_structs):
     (file_id, struct_id) appear in chosen_structs.
     Assumes metadata_df rows align 1:1 with X rows.
     """
+    effective_struct_id_col = (
+        "source_struct_id" if "source_struct_id" in metadata_df.columns else "struct_id"
+    )
+    structure_keys = chosen_structs.loc[:, ["file_id", "struct_id"]].drop_duplicates().copy()
+    if effective_struct_id_col != "struct_id":
+        structure_keys = structure_keys.rename(columns={"struct_id": effective_struct_id_col})
     keep = metadata_df.merge(
-        chosen_structs.loc[:, ["file_id", "struct_id"]].drop_duplicates(),
-        on=["file_id", "struct_id"],
+        structure_keys,
+        on=["file_id", effective_struct_id_col],
         how="inner",
         copy=False,
     )

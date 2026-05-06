@@ -56,7 +56,7 @@ X_i = [ SOAP_i , F_i,α , F_i,β ]
 
 **Outputs (`desc/`):**
 - `*.npy` descriptor matrix, shape `(N_atoms, D)`.
-- `*_provenance.parquet|csv` with `(file_id, struct_id, atom_id, symbol, is_fixed)`.
+- `*_provenance.parquet|csv` with `(file_id, struct_id, atom_id, symbol, is_fixed)` and, when frame subsampling is enabled, `source_struct_id` storing the original frame index within the source file.
 - `*_filemap.json` mapping `file_id -> file_path`.
 - `*_config.json` with `soap_dim`, `force_dim`, `include_forces`.
 
@@ -90,6 +90,11 @@ X_std = (X - mean(X)) / std(X)
 **Sampling methods:**  
 - FPS (Farthest Point Sampling)  
 - Optional clustering or random sampling
+
+**Auto-stop options:**  
+- Standard behavior: sample until `target_mean_cov` is reached.
+- Optional plateau stop: if enabled, once coverage reaches `coverage_threshold_min`, sampling stops early when the last `plateau_window` coverage checks vary by at most `delta_cov`.
+- This is most meaningful with the seeded-batch strategy, where each iteration adds a new batch and preserves progression.
 
 **Outputs (`selected/`):**
 - `*_selected_manifest.csv` with `(file_path, struct_id, atom_id, ... )`
@@ -153,6 +158,20 @@ Outputs are written to:
 
 `01_descriptors_computation.ipynb` now defaults to cleaning old files from `desc/` before saving a new descriptor run. This is intentional: the later notebooks expect one coherent descriptor/provenance/filemap/config set.
 
+## Optional: Restrict Input Files and Frames
+
+In `01_descriptors_computation.ipynb`, you can keep the default full dataset or reduce the input before descriptor computation:
+
+- `file_selection_mode = "all"` keeps every discovered file.
+- `file_selection_mode = "random"` with `random_file_count = N` selects `N` files at random, reproducibly with `selection_seed`.
+- `file_selection_mode = "stride"` with `file_stride = N` keeps files `0, N, 2N, ...` in sorted discovery order. For example, `file_stride = 3` keeps one file and skips the next two.
+- `frame_stride = N` keeps frames `0, N, 2N, ...` inside each selected file. For example, `frame_stride = 2` keeps every other structure.
+
+The default behavior remains:
+
+- `file_selection_mode = "all"`
+- `frame_stride = 1`
+
 ## Optional: Append Forces to SOAP
 
 In `01_descriptors_computation.ipynb`, set:
@@ -198,7 +217,7 @@ The input discovery uses ASE and accepts common formats:
 - `*.xyz` and `*.extxyz`
 - `*.traj`
 
-You can extend the patterns in `src/workflow_config.py` or directly in the notebooks.
+You can extend the patterns in `src/workflow_config.py` or directly in the notebooks. The notebook can also subsample the discovered file list and the frames inside each file before computing descriptors.
 
 ### Tested Scope
 

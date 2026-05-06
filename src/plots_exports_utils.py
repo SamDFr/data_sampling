@@ -99,6 +99,10 @@ def plot_sampling_pca(
 
 #for single structure loading 
 
+def _frame_index_col(df: pd.DataFrame) -> str:
+    """Canonical frame index column for reloading source structures."""
+    return "source_struct_id" if "source_struct_id" in df.columns else "struct_id"
+
 def _load_struct(path: str, frame_idx: int) -> Atoms:
     """Read a single structure index from a vasprun.xml-like file."""
     return read(path, index=int(frame_idx))
@@ -106,10 +110,12 @@ def _load_struct(path: str, frame_idx: int) -> Atoms:
 def _collect_images(chosen_structs: pd.DataFrame) -> List[Atoms]:
 
     """
-    chosen_structs must have columns: ['file_path','struct_id'].
+    chosen_structs must have columns: ['file_path','struct_id'] or
+    ['file_path','source_struct_id'].
     Returns list of Atoms in row order.
     """
-    req_cols = {"file_path", "struct_id"}
+    frame_col = _frame_index_col(chosen_structs)
+    req_cols = {"file_path", frame_col}
     missing = req_cols - set(chosen_structs.columns)
     if missing:
         raise KeyError(f"chosen_structs missing columns: {missing}")
@@ -117,7 +123,7 @@ def _collect_images(chosen_structs: pd.DataFrame) -> List[Atoms]:
 
     imgs: List[Atoms] = []
     for _, row in tqdm(chosen_structs.iterrows(), total=len(chosen_structs), desc="Loading structures"):
-        imgs.append(_load_struct(row["file_path"], int(row["struct_id"])))
+        imgs.append(_load_struct(row["file_path"], int(row[frame_col])))
     return imgs
 
 def _can_write_single_xdatcar(images: List[Atoms]) -> bool:
@@ -194,13 +200,14 @@ def _load_structs(path: str, frame_idx_list: List[int]) -> Dict[int, Atoms]:
 
 def _group_indices(chosen_structs: pd.DataFrame) -> Dict[str, List[int]]:
     """Map file_path -> sorted unique struct indices to load."""
-    REQ_COLS = {"file_path", "struct_id"}
+    frame_col = _frame_index_col(chosen_structs)
+    REQ_COLS = {"file_path", frame_col}
     missing = REQ_COLS - set(chosen_structs.columns)
     if missing:
         raise KeyError(f"chosen_structs missing columns: {missing}")
     groups = defaultdict(set)
     for _, row in chosen_structs.iterrows():
-        groups[row["file_path"]].add(int(row["struct_id"]))
+        groups[row["file_path"]].add(int(row[frame_col]))
     return {fp: sorted(idxs) for fp, idxs in groups.items()}
 
 def _collect_images_grouped(chosen_structs: pd.DataFrame) -> List[Atoms]:
@@ -208,7 +215,8 @@ def _collect_images_grouped(chosen_structs: pd.DataFrame) -> List[Atoms]:
     Open each file once, extract requested frames, and return Atoms
     in the original row order. Duplicates return independent copies.
     """
-    REQ_COLS = {"file_path", "struct_id"}
+    frame_col = _frame_index_col(chosen_structs)
+    REQ_COLS = {"file_path", frame_col}
     missing = REQ_COLS - set(chosen_structs.columns)
     if missing:
         raise KeyError(f"chosen_structs missing columns: {missing}")
@@ -221,13 +229,13 @@ def _collect_images_grouped(chosen_structs: pd.DataFrame) -> List[Atoms]:
         cache[fp] = _load_structs(fp, by_file[fp])
 
     # Handle duplicates by copying
-    key_counts = Counter((row["file_path"], int(row["struct_id"])) 
+    key_counts = Counter((row["file_path"], int(row[frame_col])) 
                          for _, row in chosen_structs.iterrows())
 
     imgs: List[Atoms] = []
     for _, row in tqdm(chosen_structs.iterrows(), total=len(chosen_structs), desc="Assembling"):
         fp = row["file_path"]
-        idx = int(row["struct_id"])
+        idx = int(row[frame_col])
         try:
             a = cache[fp][idx]
         except KeyError:
@@ -239,7 +247,8 @@ def _collect_images_grouped(chosen_structs: pd.DataFrame) -> List[Atoms]:
 
 def _choose_load_mode(chosen_structs: pd.DataFrame) -> str:
     # group if any file has multiple frames
-    counts = chosen_structs.groupby("file_path")["struct_id"].nunique()
+    frame_col = _frame_index_col(chosen_structs)
+    counts = chosen_structs.groupby("file_path")[frame_col].nunique()
     return "grouped" if (counts > 1).any() else "single"
 
 def export_selected_structures(
@@ -297,7 +306,8 @@ def export_selected_structures(
             out["xdatcar"] = "multiple"
             # respect chosen load strategy per file as well
             for fpath, group in chosen_structs.groupby("file_path", sort=False):
-                idxs = [int(i) for i in group["struct_id"].tolist()]
+                frame_col = _frame_index_col(group)
+                idxs = [int(i) for i in group[frame_col].tolist()]
                 if mode == "grouped":
                     fmap = _load_structs(fpath, idxs)     # one-shot
                     imgs = [fmap[i] for i in idxs]
