@@ -24,12 +24,12 @@ def discover_structure_files(
         Directories or explicit file paths.
     patterns:
         Glob patterns used inside directories. If None, uses a generic set
-        covering common VASP and XYZ formats.
+        covering common VASP, XYZ, and ASE trajectory formats.
     recursive:
         If True, search recursively within directories.
     """
     if patterns is None:
-        patterns = ["vasprun*.xml", "XDATCAR*", "*.xyz", "*.extxyz"]
+        patterns = ["vasprun*.xml", "XDATCAR*", "*.xyz", "*.extxyz", "*.traj"]
     if isinstance(patterns, str):
         patterns = [patterns]
     files: List[Path] = []
@@ -70,7 +70,7 @@ def ensure_directory(path: str | Path) -> Path:
 @dataclass
 class InputConfig:
     roots: List[str] = field(default_factory=list)
-    patterns: List[str] = field(default_factory=lambda: ["vasprun*.xml", "XDATCAR*", "*.xyz", "*.extxyz"])
+    patterns: List[str] = field(default_factory=lambda: ["vasprun*.xml", "XDATCAR*", "*.xyz", "*.extxyz", "*.traj"])
     recursive: bool = True
 
     def discover(self) -> List[Path]:

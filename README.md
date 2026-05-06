@@ -2,7 +2,7 @@
 
 Descriptor-based workflow to build compact, diverse training/validation/test sets from atomistic datasets.
 
-This repository is **system‑agnostic**: it works with any structure files supported by ASE (e.g. `vasprun.xml`, `XDATCAR`, `.xyz`), and produces descriptors, embeddings, and sampled subsets with full provenance.
+This repository is **system‑agnostic**: it works with any structure files supported by ASE (e.g. `vasprun.xml`, `XDATCAR`, `.xyz`, `.traj`), and produces descriptors, embeddings, and sampled subsets with full provenance.
 
 ---
 
@@ -39,7 +39,7 @@ Below is the exact flow, with the data objects each notebook produces and consum
 ### 1) `01_descriptors_computation.ipynb`
 **Goal:** Convert structures into per‑atom descriptor vectors and build provenance.
 
-- **Input:** `vasprun.xml`, `XDATCAR`, `.xyz` (any ASE‑readable format).
+- **Input:** `vasprun.xml`, `XDATCAR`, `.xyz`, `.traj` (any ASE‑readable format).
 - **Descriptor:** SOAP vectors for each atom.
 - **Optional augmentation:** append force components.
 
@@ -142,7 +142,7 @@ pip install -r requirements.txt
 
 ## Quick Start (Notebooks)
 
-1. Prepare structures as `vasprun.xml`, `XDATCAR`, or `.xyz` files (or folders containing them).
+1. Prepare structures as `vasprun.xml`, `XDATCAR`, `.xyz`, or `.traj` files (or folders containing them).
 2. Put them under `./data/` (or edit the input roots in the notebook).
 3. Run the notebooks in order: `01` → `06`.
 
@@ -196,6 +196,7 @@ The input discovery uses ASE and accepts common formats:
 - `vasprun*.xml`
 - `XDATCAR*`
 - `*.xyz` and `*.extxyz`
+- `*.traj`
 
 You can extend the patterns in `src/workflow_config.py` or directly in the notebooks.
 
