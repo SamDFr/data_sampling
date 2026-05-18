@@ -276,19 +276,25 @@ Set the default branch on your Git host if you want new clones to land on the ge
 If you use this repository, please cite:
 
 **Samuel Del Fré, Gilberto A. Alou Angulo, Maurice Monnerville, Alejandro Rivero Santamaría (2026)**  
-*Data‑Driven Construction of Machine‑Learning‑Based Interatomic Potentials for Gas–Surface Scattering Dynamics: The Case of NO on Graphite*  
-DOI: 10.48550/arXiv.2603.18864
+*Data‑Driven Construction of Machine‑Learning‑Based Interatomic Potentials for Gas–Surface Scattering Dynamics: The Case of NO on Graphite*, The Journal of Physical Chemistry C
+DOI: 10.1021/acs.jpcc.6c01815
 
 ### BibTeX
 
 ```bibtex
-@online{delfre2026mlip_gassurface,
-  title = {Data-Driven Construction of Machine-Learning-Based Interatomic Potentials for Gas-Surface Scattering Dynamics: The Case of NO on Graphite},
-  author = {Del Fr\'e, Samuel and Angulo, Gilberto A. Alou and Monnerville, Maurice and Santamar\'ia, Alejandro Rivero},
-  year = {2026},
-  eprint = {2603.18864},
-  eprinttype = {arXiv},
-  eprintclass = {physics},
-  doi = {10.48550/arXiv.2603.18864}
+@article{delfreDataDrivenConstructionMachineLearningBased2026a,
+  title = {Data-{{Driven Construction}} of {{Machine-Learning-Based Interatomic Potentials}} for {{Gas}}--{{Surface Scattering Dynamics}}: {{The Case}} of {{NO}} on {{Graphite}}},
+  shorttitle = {Data-{{Driven Construction}} of {{Machine-Learning-Based Interatomic Potentials}} for {{Gas}}--{{Surface Scattering Dynamics}}},
+  author = {Del Fr{\'e}, Samuel and Alou Angulo, Gilberto A. and Monnerville, Maurice and Rivero Santamar{\'i}a, Alejandro},
+  year = 2026,
+  month = may,
+  journal = {The Journal of Physical Chemistry C},
+  pages = {acs.jpcc.6c01815},
+  issn = {1932-7447, 1932-7455},
+  doi = {10.1021/acs.jpcc.6c01815},
+  urldate = {2026-05-18},
+  copyright = {https://doi.org/10.15223/policy-029},
+  langid = {english},
 }
 ```
+
