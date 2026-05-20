@@ -177,7 +177,7 @@ The default behavior remains:
 In `01_descriptors_computation.ipynb`, set:
 
 - `include_forces = True`
-- `force_components_idx = (0, 1)` (or another pair)
+- `force_components_idx = (0, 1, 2)` by default for `Fx, Fy, Fz` (or choose another subset)
 
 This appends the selected force components to each SOAP vector. The run config saved in `desc/*_config.json` records `soap_dim` and `force_dim`.
 
@@ -186,7 +186,7 @@ In `02_descriptors_dim_red.ipynb`, set:
 - `use_forces_in_dimred = True` to reduce SOAP+forces
 - `use_forces_in_dimred = False` to reduce SOAP only
 
-If forces are not present in the input files, the pipeline prints a warning and falls back to SOAP‑only descriptors.
+If force information is not present in the selected input structures, the pipeline prints an explicit warning and falls back to SOAP‑only descriptors. This can happen with formats that do not store forces, such as plain `.xyz` files.
 
 ---
 
@@ -297,4 +297,3 @@ DOI: 10.1021/acs.jpcc.6c01815
   langid = {english},
 }
 ```
-
