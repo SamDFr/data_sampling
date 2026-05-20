@@ -49,10 +49,10 @@ SOAP encodes the local atomic environment by expanding a neighbor density in a r
 **Optional force augmentation:**  
 If enabled, the descriptor per atom becomes:
 ```
-X_i = [ SOAP_i , F_i,α , F_i,β ]
+X_i = [ SOAP_i , F_i,x , F_i,y , F_i,z ]
 ```
 - `SOAP_i` is the SOAP vector for atom `i`.
-- `F_i,α` and `F_i,β` are selected force components (e.g. Fx,Fy).
+- `F_i,x`, `F_i,y`, and `F_i,z` are the selected force components. By default the notebook uses all three (`Fx, Fy, Fz`).
 
 **Outputs (`desc/`):**
 - `*.npy` descriptor matrix, shape `(N_atoms, D)`.
@@ -97,7 +97,7 @@ X_std = (X - mean(X)) / std(X)
 - This is most meaningful with the seeded-batch strategy, where each iteration adds a new batch and preserves progression.
 
 **Outputs (`selected/`):**
-- `*_selected_manifest.csv` with `(file_path, struct_id, atom_id, ... )`
+- `*_selected_manifest.csv` with structure-level identifiers and export metadata such as `(file_id, file_path, struct_id, n_atoms_hit, n_atoms, formula, species_sequence, ...)`
 - `*_selected.traj` and `*_selected.xyz`
 
 ### 4) `04_sampling_analysis.ipynb`
@@ -231,7 +231,7 @@ You can extend the patterns in `src/workflow_config.py` or directly in the noteb
 - **Descriptor matrix**: `desc/*.npy`  
   Rows map to atom environments.  
 - **Provenance table**: `desc/*_provenance.*`  
-  Tracks `(file_id, struct_id, atom_id, symbol, is_fixed)`.
+  Tracks `(file_id, struct_id, atom_id, symbol, is_fixed)`, and includes `source_struct_id` when frame subsampling is enabled.
 - **File map**: `desc/*_filemap.json`  
   Maps `file_id → file_path` for reconstruction.
 - **Selection manifest**: `selected/*_selected_manifest.csv`  
