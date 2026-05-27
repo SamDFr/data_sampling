@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 from ase.atoms import Atoms
 from ase.io import read
+from tqdm.auto import tqdm
 
 from src.desc_comp_utils import fixed_mask
 
@@ -68,6 +69,7 @@ def load_structure_sets(
     paths: Sequence[str | Path],
     frame_stride: int = 1,
     return_frame_indices: bool = False,
+    show_progress: bool = False,
 ) -> List[List[Atoms]] | tuple[List[List[Atoms]], List[List[int]]]:
     """
     Load each file in `paths` as a list of ASE Atoms objects.
@@ -78,14 +80,20 @@ def load_structure_sets(
         Keep every Nth frame from each file (0, N, 2N, ...). Use 1 to keep all.
     return_frame_indices
         If True, also return the original frame indices kept from each file.
+    show_progress
+        If True, show a per-file progress bar while loading structures.
     """
     if frame_stride <= 0:
         raise ValueError("frame_stride must be >= 1.")
 
     out: List[List[Atoms]] = []
     frame_ids: List[List[int]] = []
-    for path in paths:
-        frames = read(str(path), index=":")
+    progress = tqdm(paths, desc="Loading structures", unit="file") if show_progress else paths
+    for path in progress:
+        path_obj = Path(path).expanduser().resolve()
+        if show_progress:
+            progress.set_description(f"Loading structure from {path_obj.name}")
+        frames = read(str(path_obj), index=":")
         if isinstance(frames, Atoms):
             full_structures = [frames]
         else:
