@@ -549,10 +549,9 @@ def sample_to_coverage(
         if not enable_plateau_stop or len(history) < plateau_window:
             return False
         window = history[-plateau_window:]
-        current_cov = window[-1]["mean_cov"]
-        if current_cov < coverage_threshold_min:
+        cov_values = [point["best_mean_cov"] for point in window]
+        if min(cov_values) < coverage_threshold_min:
             return False
-        cov_values = [point["mean_cov"] for point in window]
         return (max(cov_values) - min(cov_values)) <= delta_cov
 
     k = int(k_start)
@@ -562,10 +561,17 @@ def sample_to_coverage(
     while k <= k_max:
         idx = sample(X, method=method, k=k, seed=seed, progress=progress, **kwargs)
         per_pc, mean_cov, bins_used = coverage(X, idx)
-        history.append({"k": int(k), "mean_cov": float(mean_cov)})
+        if mean_cov > best["mean_cov"]:
+            best = {"k": k, "idx": idx, "per_pc": per_pc, "mean_cov": mean_cov, "bins_used": bins_used}
+
+        history.append({
+            "k": int(k),
+            "mean_cov": float(mean_cov),
+            "best_mean_cov": float(best["mean_cov"]),
+        })
 
         if progress:
-            print(f"[{method}] k={k:,}  mean_cov={mean_cov:.3f}  bins_used={bins_used[:8]}")
+            print(f"[{method}] k={k:,}  mean_cov={mean_cov:.6f}  bins_used={bins_used[:8]}")
 
         if mean_cov >= target_mean_cov:
             return idx, {
@@ -577,14 +583,11 @@ def sample_to_coverage(
                 "stop_reason": "target_reached",
             }
 
-        if mean_cov > best["mean_cov"]:
-            best = {"k": k, "idx": idx, "per_pc": per_pc, "mean_cov": mean_cov, "bins_used": bins_used}
-
         if plateau_reached(history):
             if progress:
                 print(
                     f"[{method}] plateau stop at k={k:,}: "
-                    f"mean_cov window span <= {delta_cov:.4f} after reaching {coverage_threshold_min:.3f}"
+                    f"best_mean_cov window span <= {delta_cov:.4f} after sustaining {coverage_threshold_min:.3f}"
                 )
             return best["idx"], {
                 "k": best["k"],
@@ -603,7 +606,7 @@ def sample_to_coverage(
 
     # not reached target; return best so far
     if progress:
-        print(f"Target not reached. Best mean_cov={best['mean_cov']:.3f} at k={best['k']:,}.")
+        print(f"Target not reached. Best mean_cov={best['mean_cov']:.6f} at k={best['k']:,}.")
     return best["idx"], {
         "k": best["k"],
         "per_pc": best["per_pc"],
@@ -709,10 +712,9 @@ def sample_to_coverage_seeded_batches(
         if not enable_plateau_stop or len(history) < plateau_window:
             return False
         window = history[-plateau_window:]
-        current_cov = window[-1]["mean_cov"]
-        if current_cov < coverage_threshold_min:
-            return False
         cov_values = [point["mean_cov"] for point in window]
+        if min(cov_values) < coverage_threshold_min:
+            return False
         return (max(cov_values) - min(cov_values)) <= delta_cov
 
     N = X.shape[0]
@@ -726,7 +728,7 @@ def sample_to_coverage_seeded_batches(
     per_pc, mean_cov, bins_used = coverage(idx)
     history = [{"k": int(idx.size), "mean_cov": float(mean_cov)}]
     if progress:
-        print(f"[{method}-seeded] k={idx.size:,} mean_cov={mean_cov:.3f}")
+        print(f"[{method}-seeded] k={idx.size:,} mean_cov={mean_cov:.6f}")
 
     # loop: add batches from remaining pool with new seeds
     round_id = 1
@@ -753,12 +755,12 @@ def sample_to_coverage_seeded_batches(
         per_pc, mean_cov, bins_used = coverage(idx)
         history.append({"k": int(idx.size), "mean_cov": float(mean_cov)})
         if progress:
-            print(f"[{method}-seeded] +{k_try:,} → k={idx.size:,} mean_cov={mean_cov:.3f}")
+            print(f"[{method}-seeded] +{k_try:,} → k={idx.size:,} mean_cov={mean_cov:.6f}")
         if plateau_reached(history):
             if progress:
                 print(
                     f"[{method}-seeded] plateau stop at k={idx.size:,}: "
-                    f"mean_cov window span <= {delta_cov:.4f} after reaching {coverage_threshold_min:.3f}"
+                    f"mean_cov window span <= {delta_cov:.4f} after sustaining {coverage_threshold_min:.3f}"
                 )
             return idx, {
                 "k": idx.size,
